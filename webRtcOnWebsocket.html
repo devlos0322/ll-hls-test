@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+
+<body onkeydown="return false" oncontextmenu="return false" onselectstart="return false" ondragstart="return false">
+   
+    <video id="video" controls autoplay muted="muted"></video>
+    <script>
+        //resource https://codepen.io/team/wowza/pen/GRZrVrQ
+        let wsConnection, videoElement = document.getElementById('video');
+        //let streamName = '11.stream';
+        //let applicationName = "live2";
+        //let wssUrl = "wss://61270304f0fd8.streamlock.net/webrtc-session.json";
+        let streamName = 'ip-cam-11.stream';
+        let applicationName = "live";
+        let wssUrl = "wss://192.168.33.55/webrtc-session.json";
+
+        
+        let streamInfo = {applicationName, streamName : streamName, video};
+        let userData = { 'iceServers': [] };
+        let peerConnection = new RTCPeerConnection(userData);
+        let repeaterRetryCount;
+        try {
+            wsConnection = new WebSocket(wssUrl);
+        }
+        catch (e) {
+            console.log(e);
+        }
+        wsConnection.binaryType = 'arraybuffer';
+        wsConnection.onopen = () => {
+            peerConnection.onicecandidate = gotIceCandidate;
+            peerConnection.ontrack = () => {
+                console.log('gotRemoteTrack: kind:' + event.track.kind + ' stream:' + event.streams[0]);
+                try {
+                    videoElement.srcObject = event.streams[0];
+                    if(event.streams[0].active==false){debugger;}
+                    console.log(event.timeStamp)
+                    var Promise = videoElement.play();
+                } catch (error) {
+                        videoElement.src = window.URL.createObjectURL(event.streams[0]);
+                }
+            }
+            sendPlayGetOffer(streamInfo);
+        }
+        wsConnection.onmessage = (evt) => {
+            let msgJSON = JSON.parse(evt.data);
+            let msgStatus = Number(msgJSON['status']);
+            let msgCommand = msgJSON['command'];
+            if (msgStatus == 200) {
+                let streamInfoResponse = msgJSON['streamInfo'];
+                if (streamInfoResponse !== undefined) {
+                    streamInfo.sessionId = streamInfoResponse.sessionId;
+                }
+                let sdpData = msgJSON['sdp'];
+                if (sdpData != null) {
+                    console.log('sdp: ' + JSON.stringify(msgJSON['sdp']));
+                    if (mungeSDP != null)
+                    {
+                    console.log(mungeSDP)
+                    msgJSON.sdp.sdp = mungeSDP(msgJSON.sdp.sdp);
+                    }
+                    console.log("SDP Data: " + msgJSON.sdp.sdp);
+
+                    peerConnection
+                    .setRemoteDescription(new RTCSessionDescription(msgJSON.sdp))
+                    .then(() => peerConnection
+                        .createAnswer()
+                        .then((description) => {
+                            peerConnection.setLocalDescription(description)
+                            .then(() => {
+                                console.log('sendAnswer');
+                                wsConnection.send('{"direction":"play", "command":"sendResponse", "streamInfo":' + JSON.stringify(streamInfo) + ', "sdp":' + JSON.stringify(description) + ', "userData":' + JSON.stringify(userData) + '}');
+                            })
+                            .catch(err => console.log('set local description error', err));
+                        })
+                    ).catch(err => console.log('set remote description error', err));
+                }
+
+                let iceCandidates = msgJSON['iceCandidates'];
+                if (iceCandidates != null) {
+                    for (let index in iceCandidates) {
+                        console.log('iceCandidates: ' + JSON.stringify(iceCandidates[index]));
+                        peerConnection.addIceCandidate(new RTCIceCandidate(iceCandidates[index]));
+                    }
+                }
+            }
+        }
+        wsConnection.onerror = function (evt) {
+            console.log(evt);
+        }
+        const sendPlayGetOffer = (streamInfo) => {
+            console.log("sendPlayGetOffer: " + JSON.stringify(streamInfo));
+            wsConnection.send('{"direction":"play", "command":"getOffer", "streamInfo":' + JSON.stringify(streamInfo) + ', "userData":' + JSON.stringify(userData) + '}');
+        }
+                
+        const gotIceCandidate = (event) => {
+            if(event.candidate != null) {
+                wsConnection.send(JSON.stringify({'ice': event.candidate}));
+            }
+        }
+
+        const mungeSDP = (sdpStr) => {
+            // For greatest playback compatibility,
+            // force H.264 playback to baseline (42e01f).
+            let sdpLines = sdpStr.split(/\r\n/);
+            let sdpStrRet = '';
+
+            for (var sdpIndex in sdpLines) {
+            var sdpLine = sdpLines[sdpIndex];
+
+            if (sdpLine.length == 0)
+                continue;
+
+            if (sdpLine.includes("profile-level-id")) {
+                // The profile-level-id string has three parts: XXYYZZ, where
+                //   XX: 42 baseline, 4D main, 64 high
+                //   YY: constraint
+                //   ZZ: level ID
+                // Look for codecs higher than baseline and force downward.
+                let profileLevelId = sdpLine.substr(sdpLine.indexOf("profile-level-id")+17,6);
+                let profile = Number('0x'+profileLevelId.substr(0,2));
+                let constraint = Number('0x'+profileLevelId.substr(2,2));
+                let level = Number('0x'+profileLevelId.substr(4,2));
+                if (profile > 0x42)
+                {
+                profile = 0x42;
+                constraint = 0xE0;
+                level = 0x1F;
+                }
+                let newProfileLevelId = ("00" + profile.toString(16)).slice(-2).toLowerCase() +
+                ("00" + constraint.toString(16)).slice(-2).toLowerCase() +
+                ("00" + level.toString(16)).slice(-2).toLowerCase();
+
+                sdpLine = sdpLine.replace(profileLevelId,newProfileLevelId);
+            }
+
+            sdpStrRet += sdpLine;
+            sdpStrRet += '\r\n';
+            }
+
+            return sdpStrRet;
+        }
+        
+        function close(){
+            wsConnection1.close();
+        }
+    </script>
+</body>
