@@ -1,0 +1,31 @@
+
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset=utf-8 />
+        <title>hls.js</title>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+        <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    </head>
+<body>
+<video controls autoplay id="video-player" width="80%" muted></video>
+<script>
+	let video = document.getElementById('video-player');
+let videoSrc =
+'http://192.168.200.103:1935/rnd_mpegts_test/10.stream/playlist.m3u8';
+	if (Hls.isSupported()) {
+        let hls = new Hls();
+        hls.loadSource(videoSrc);
+        hls.attachMedia(video);
+        hls.on(Hls.Event.MANIFEST_PARSED, () => {
+            video.play();
+        });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = videoSrc;
+        video.addEventListener('loadedmetadata', () => {
+            video.play();
+        });
+    }
+</script>
+</body>
+</html>
